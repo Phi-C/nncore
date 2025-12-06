@@ -6,7 +6,7 @@ nncore is a light-weight core library that proides the most common and essential
 # Install
 ## 1. Install from Github
 ```shell
-pip install -U git+https://https://github.com/Phi-C/nncore.git
+pip install -U git+https://github.com/Phi-C/nncore.git
 ```
 
 ## 2. Install from a local clone
