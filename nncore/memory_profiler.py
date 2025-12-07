@@ -1,10 +1,13 @@
 import torch
-import torchvision
+import torch.nn as nn
+from torch._ops import OpOverload
+from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
 
 import contextlib
 import matplotlib.pyplot as plt
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Type, Callable
+from types import TracebackType
 from pathlib import Path
 from collections import defaultdict
 
@@ -17,24 +20,31 @@ class TorchMemorySnapshot:
         max_entries (int): Maximum number of entries to keep track of memory usage history. Default is 10000.
         save_path (Optional[str | Path]): Path to save the snapshot file. Default is 'snapshot.pickle'.
 
-    Usage:
-    >>> with TorchMemorySnapshot():
-    ...     # Your code here
-    ...     pass
+    Example:
+
+        .. code-block:: python
+        
+        with TorchMemorySnapshot():
+            # Your PyTorch code here
     """
 
     def __init__(
         self,
         max_entries: int = 10000,
         save_path: Optional[str | Path] = "snapshot.pickle",
-    ):
+    ) -> None:
         self.max_entries = max_entries
         self.save_path = save_path
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         torch.cuda.memory._record_memory_history(max_entries=self.max_entries)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        exec_tb: Optional[TracebackType],
+    ) -> None:
         try:
             torch.cuda.memory._dump_snapshot(self.save_path)
         except Exception as e:
@@ -56,12 +66,18 @@ cur_module: str = ""
 
 
 # =============== Helper Functions ==================
-def add_marker(mark_name: str):
+def add_marker(mark_name: str) -> None:
+    """
+    Add a marker at current point on the memory usage graph.
+    """
     marker_val = len(mem_usage.values())
     markers[mark_name] = marker_val
 
 
-def print_top_mem_op(topk):
+def print_top_mem_op(topk: int = 10) -> None:
+    """
+    Print top-k operators that consume the most GPU memory.
+    """
     op_num = len(mem_usage.keys())
     op_diff: Dict[str, float] = defaultdict(float)
     pre_mem = 0.0
@@ -77,7 +93,10 @@ def print_top_mem_op(topk):
     print("============================================================")
 
 
-def show_graph(filename):
+def show_graph(filename: str | Path = "memory_profiler.png") -> None:
+    """
+    Show the memory usage graph and save it to a file.
+    """
     y = [mb for (name, mb) in mem_usage.values()]
     min_val = min(y)
     max_val = max(y)
@@ -103,16 +122,16 @@ def show_graph(filename):
         markers.clear()
 
 
-def fwd_hook_wrapper(name):
-    def fwd_hook(module, args):
+def fwd_hook_wrapper(name: str) -> Callable[[nn.Module, Tuple[Any, ...]], None]:
+    def fwd_hook(module: nn.Module, args: Tuple[Any, ...]) -> None:
         global cur_module
         cur_module = name + ".forward"
 
     return fwd_hook
 
 
-def bwd_hook_wrapper(name):
-    def bwd_hook(module, grad_input, grad_output):
+def bwd_hook_wrapper(name: str) -> Callable[[nn.Module, Any, Any], None]:
+    def bwd_hook(module: nn.Module, grad_input: Any, grad_output: Any) -> None:
         global cur_module
         cur_module = name + ".backward"
 
@@ -126,22 +145,25 @@ def bwd_hook_wrapper(name):
 # it will trigger an error related to autograd's logic to handle view+inplace.
 # It's a problem deserved further investigation.
 @contextlib.contextmanager
-def debug_model(model):
+def debug_model(model: nn.Module) -> Iterator[None]:
 
-    hook_handles = []
+    handles: List[RemovableHandle] = []
     for name, module in model.named_modules():
-        hook_handles.append(module.register_forward_pre_hook(fwd_hook_wrapper(name)))
-        hook_handles.append(module.register_backward_hook(bwd_hook_wrapper(name)))
+        handles.append(module.register_forward_pre_hook(fwd_hook_wrapper(name)))
+        handles.append(module.register_backward_hook(bwd_hook_wrapper(name)))
 
     try:
         yield
     finally:
-        for handle in hook_handles:
+        for handle in handles:
             handle.remove()
 
 
 # =============== Core Logic ==================
-def record_fn(func_name, verbose=False):
+def record_fn(func_name: str, verbose: bool = False) -> None:
+    """
+    Record the memory usage after each operator call.
+    """
     global op_id
     mem: float = torch.cuda.memory_allocated() / MB
     max_mem: float = torch.cuda.max_memory_allocated() / MB
@@ -154,10 +176,16 @@ def record_fn(func_name, verbose=False):
 
 
 class MemoryProfileDispatchMode(TorchDispatchMode):
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False) -> None:
         self.verbose = verbose
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(
+        self,
+        func: OpOverload,
+        types: Tuple[type, ...],
+        args: Tuple[Any, ...] = (),
+        kwargs: Dict[str, Any] = None,
+    ) -> Any:
         rs = func(*args, **kwargs)
         global cur_module
         if func == torch.ops.aten.detach.default:
@@ -168,23 +196,3 @@ class MemoryProfileDispatchMode(TorchDispatchMode):
         )
         record_fn(func_name, self.verbose)
         return rs
-
-
-# =============== Demo ==================
-def test_memory_profile_dispatch_mode():
-    model = torchvision.models.resnet34().cuda()
-    input = torch.rand(32, 3, 224, 224, device="cuda")
-
-    with debug_model(model):
-        with MemoryProfileDispatchMode(True):
-            loss = model(input)
-            add_marker("fw_bw_boundary")
-            loss.sum().backward()
-
-    print_top_mem_op(10)
-    show_graph("memory_profiler.png")
-
-
-if __name__ == "__main__":
-    test_memory_profile_dispatch_mode()
-
