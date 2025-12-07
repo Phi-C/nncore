@@ -4,62 +4,92 @@ import subprocess
 import distutils.util as util
 import shlex
 import multiprocessing
+from typing import List, Union, Tuple
 
-def get_ips():
-    """Read IP address from hostfile"""
 
-    ip_config = os.path.join(os.path.dirname(__file__), "hostfile")
+def get_ips() -> List[str]:
+    """
+    Read IP address from hostfile
+    
+    Returns:
+        List[str]: List of IP addresses
+    """
+
+    ip_config = os.path.join(os.getcwd(), "hostfile")
     if not os.path.exists(ip_config):
-        raise RuntimeError("ip_config file does not exist")
+        raise RuntimeError(f"{ip_config} does not exist")
     print(f"[INFO] Reading IP list from {ip_config}")
 
     cond = lambda x: x.strip() and not x.strip().startswith("#")
     with open(ip_config, "r") as f:
         return [line.strip().split(" ")[0] for line in f.readlines() if cond(line)]
 
-def get_self_ip():
-    """Get IP address of current host"""
+
+def get_self_ip() -> str:
+    """
+    Get IP address of current host
+    
+    Returns:
+        str: IP address of current host
+    """
 
     ip = subprocess.check_output(["hostname", "-i"]).decode().strip()
     return ip
 
 
-def concat_cmd(cmd):
-    """Concatenate commands into one string"""
+def concat_cmd(cmd: List[str]) -> str:
+    """
+    Concatenate commands into one string
+    
+    Returns:
+        str: Concatenated command string
+    """
 
     return " ".join([shlex.quote(c) for c in cmd])
 
-def execute_cmd(cmd):
-    """Execute a shell command and return its exit code"""
+
+def execute_cmd(cmd: List[str]) -> int:
+    """
+    Execute a shell command and return its exit code
+    
+    Returns:
+        int: Exit code of the command
+    """
 
     print(f"[EXEC] {cmd}")
     return os.system(cmd)
 
 
-def is_script_file(file_path, check_extensions=('.sh'), check_executable=False):
+def is_script_file(
+    file_path: str,
+    check_extensions: Tuple[str] = (".sh"),
+    check_executable: bool = False,
+) -> bool:
     """Check if a file is a script file"""
 
-    # 基础检查：是否为文件
+    # Basic check: file check
     if not os.path.isfile(file_path):
         return False
 
-    # 检查扩展名（如果指定）
+    # Extension check (if enabled)
     if check_extensions:
         if not file_path.lower().endswith(check_extensions):
             return False
 
-    # 检查可执行权限（如果启用）
+    # Check executable permission (if enabled)
     if check_executable and not os.access(file_path, os.X_OK):
         return False
 
     return True
 
-def sync_file(path):
-    """Synchronize files/directories to all remote hosts via rsync commands
+
+def sync_file(path: Union[str, List[str], Tuple[str]]) -> None:
+    """
+    Synchronize files/directories to all remote hosts via rsync commands
     
     Notes:
-    1. 不同步当前机器
-    2. 待同步文件在各机器位于同于路径下
+    1. Don't synchronize the current machine itself
+    2. The files to be synchronized are located at the same path on all machines
     """
 
     if isinstance(path, (list, tuple)):
@@ -72,20 +102,20 @@ def sync_file(path):
         print(f"[WARN] Path does not exist: {path}")
         return
 
-    self_ip = get_self_ip()
-    ips = get_ips()
-    cmds = []
+    self_ip: str = get_self_ip()
+    ips: List[str] = get_ips()
+    cmds: List[str] = []
 
     for ip in ips:
         if ip == self_ip:
             continue
 
         if os.path.isdir(path):
-            rsync_cmd = f"rsync -avz --delete {shlex.quote(path)}/ {ip}:{shlex.quote(path)}/"
-        else:
             rsync_cmd = (
-                f"rsync -avz {shlex.quote(path)} {ip}:{shlex.quote(path)}"
+                f"rsync -avz --delete {shlex.quote(path)}/ {ip}:{shlex.quote(path)}/"
             )
+        else:
+            rsync_cmd = f"rsync -avz {shlex.quote(path)} {ip}:{shlex.quote(path)}"
 
         cmds.append(rsync_cmd)
 
@@ -97,15 +127,17 @@ def sync_file(path):
             pool.map(execute_cmd, cmds)
 
 
-def sync_cmd(cmd):
-    """Synchronize commands across multiple machines"""
+def sync_cmd(cmd: List[str]) -> None:
+    """
+    Synchronize commands across multiple machines
+    """
 
     if len(cmd) == 1 and is_script_file(cmd[0]):
         cmd_list = []
         cmd_list.append("cd {0}".format(os.path.abspath(".")))
         with open(cmd[0], "r") as f:
             lines = f.readlines()
-        
+
         for line in lines:
             if line.strip() and not line.strip().startswith("#"):
                 cmd_list.append(line.strip())
@@ -113,7 +145,6 @@ def sync_cmd(cmd):
         full_cmd = "; ".join(cmd_list)
     else:
         full_cmd = "cd {0}; {1}".format(os.path.abspath("."), concat_cmd(cmd))
-
 
     self_ip = get_self_ip()
     ips = get_ips()
@@ -126,7 +157,9 @@ def sync_cmd(cmd):
             # 先配置SSH密钥免密登录:
             # 1. 在master服务器生成密钥对: ssh-keygen -t rsa
             # 2. 将公钥拷贝到其他服务器: ssh-copy-id username@target_ip
-            exe_cmd = concat_cmd(["ssh", "-o", "StrictHostKeyChecking=no", f"root@{ip}", full_cmd])
+            exe_cmd = concat_cmd(
+                ["ssh", "-o", "StrictHostKeyChecking=no", f"root@{ip}", full_cmd]
+            )
         else:
             exe_cmd = full_cmd
 
@@ -145,7 +178,7 @@ def sync_cmd(cmd):
             pool.map(execute_cmd, cmds)
 
 
-if __name__ == "__main__":
+def main() -> None:
     mode = sys.argv[1]
     assert mode in ["file", "cmd"]
     if mode == "file":
@@ -154,3 +187,7 @@ if __name__ == "__main__":
         sync_cmd(sys.argv[2:])
     else:
         raise ValueError("Invalid mode: {}".format(mode))
+
+
+if __name__ == "__main__":
+    main()
