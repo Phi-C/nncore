@@ -66,6 +66,10 @@ cur_module: str = ""
 
 
 # =============== Helper Functions ==================
+def measure_peak_memory() -> float:
+    torch.cuda.synchronize()
+    return torch.cuda.max_memory_allocated() / MB
+
 def add_marker(mark_name: str) -> None:
     """
     Add a marker at current point on the memory usage graph.
