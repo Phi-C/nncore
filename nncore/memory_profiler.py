@@ -66,7 +66,7 @@ cur_module: str = ""
 
 
 # =============== Helper Functions ==================
-def measure_peak_memory() -> float:
+def measure_current_memory() -> float:
     torch.cuda.synchronize()
     return torch.cuda.max_memory_allocated() / MB
 
