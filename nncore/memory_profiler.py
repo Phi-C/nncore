@@ -23,7 +23,7 @@ class TorchMemorySnapshot:
     Example:
 
         .. code-block:: python
-        
+
         with TorchMemorySnapshot():
             # Your PyTorch code here
     """
@@ -69,6 +69,7 @@ cur_module: str = ""
 def measure_current_memory() -> float:
     torch.cuda.synchronize()
     return torch.cuda.max_memory_allocated() / MB
+
 
 def add_marker(mark_name: str) -> None:
     """
@@ -164,7 +165,7 @@ def debug_model(model: nn.Module) -> Iterator[None]:
 
 
 # =============== Core Logic ==================
-def record_fn(func_name: str, verbose: bool = False) -> None:
+def record_fn(func_name: str, dtype: str, verbose: bool = False) -> None:
     """
     Record the memory usage after each operator call.
     """
@@ -175,7 +176,7 @@ def record_fn(func_name: str, verbose: bool = False) -> None:
     max_mem_usage[op_id] = (func_name, max_mem)
     torch.cuda.reset_peak_memory_stats()
     if verbose:
-        print(f"Memory Usage: {op_id:06d}: [{func_name}]: {mem:.3f}")
+        print(f"Memory Usage: {op_id:06d}: [{func_name}]: {mem:.3f}, {dtype}")
     op_id += 1
 
 
@@ -198,5 +199,6 @@ class MemoryProfileDispatchMode(TorchDispatchMode):
         func_name = (
             cur_module + "." + func.__name__ + "_" + str(operator_names[func.__name__])
         )
-        record_fn(func_name, self.verbose)
+        dtype = str(rs.dtype) if isinstance(rs, torch.Tensor) else "N/A"
+        record_fn(func_name, dtype, self.verbose)
         return rs
