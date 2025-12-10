@@ -3,9 +3,10 @@ import csv
 from time import perf_counter, strftime, localtime, sleep
 from typing import Optional, Type, List, Dict
 from types import TracebackType
+from utils import SingletonMeta
 
 
-class TimerV2:
+class TimerV2(SingletonMeta):
     """
     A timer which computes the elapsed time.
 
