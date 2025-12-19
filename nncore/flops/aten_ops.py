@@ -29,7 +29,10 @@ def matmul_flop(inputs: List[Any], outputs: List[Any]) -> int:
     input_shapes = [v.shape for v in inputs]
     assert len(input_shapes) == 2, input_shapes
     assert input_shapes[0][-1] == input_shapes[1][-2], input_shapes
-    flop = prod(input_shapes[0]) * input_shapes[-1][-1]
+    # For matix [m, k] x [k, n], the flop number is m x k x n x 2.
+    # GFLOPS = 2 * GMACs: https://github.com/sovrasov/flops-counter.pytorch/issues/16
+    # Reference: https://arxiv.org/pdf/2205.05198
+    flop = prod(input_shapes[0]) * input_shapes[1][-1] * 2
     return flop
 
 
@@ -46,7 +49,7 @@ def addmm_flop(inputs: List[Any], outputs: List[Any]) -> int:
     assert len(input_shapes[1]) == 2, input_shapes[1]
     batch_size, input_dim = input_shapes[0]
     output_dim = input_shapes[1][1]
-    flops = batch_size * input_dim * output_dim
+    flops = batch_size * input_dim * output_dim * 2
 
     if inputs[0] is not None:
         flops += batch_size * output_dim
@@ -62,9 +65,9 @@ def bmm_flop(inputs: List[Any], outputs: List[Any]) -> int:
     # Inputs contains the shapes of two tensors.
     assert len(inputs) == 2, len(inputs)
     input_shapes = [v.shape for v in inputs]
-    n, c, t = input_shapes[0]
-    d = input_shapes[-1][-1]
-    flop = n * c * t * d
+    bs, m, k = input_shapes[0]
+    n = input_shapes[-1][-1]
+    flop = bs * m * k * n * 2
     return flop
 
 
@@ -106,6 +109,21 @@ def conv_flop(inputs: List[Any], outputs: List[Any]) -> int:
     )
 
 
+def attn_flop(inputs: List[Any], outputs: List[Any]) -> int:
+    """
+    Count flops for attention.
+    """
+    assert len(inputs) == 3, len(inputs)
+    input_shapes = [v.shape for v in inputs]
+    bs, num_head, seq_len, head_dim = inputs[0].shape
+    assert input_shapes[0] == input_shapes[1] == input_shapes[2], input_shapes
+
+    attn_score_flops = bs * num_head * seq_len * head_dim * seq_len * 2
+    attn_flops = bs * num_head * seq_len * seq_len * head_dim * 2
+
+    return attn_score_flops + attn_flops
+
+
 ATEN_OPS_MAPPING = {
     aten.mm: matmul_flop,
     aten.matmul: matmul_flop,
@@ -113,4 +131,6 @@ ATEN_OPS_MAPPING = {
     aten.bmm: bmm_flop,
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
+    aten._scaled_dot_product_flash_attention: attn_flop,
+    aten._scaled_dot_product_flash_attention_for_cpu: attn_flop,
 }
