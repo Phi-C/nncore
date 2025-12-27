@@ -1,5 +1,5 @@
 #! /bin/bash
-set -euo pipeline
+set -euo pipefail
 
 TARGET_IP=${TARGET_IP:-"127.0.0.1"}
 PORT=${PORT:-"23456"}
